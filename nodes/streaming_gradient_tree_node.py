@@ -1,9 +1,7 @@
-# TODO: fix that
 import sys
+import numbers
 
-sys.path.append('..')
-
-from utils import EqualBinFeatureQuantizer, GradHessStats
+from ..utils import EqualBinFeatureQuantizer, GradHessStats
 
 
 class SGTSplit:
@@ -38,30 +36,31 @@ class SGTNode:
         self._split_stats = {}
         self._update_stats = GradHessStats()
 
-    def sort_instance(self, X):
+    def sort_instance(self, x):
         if self._split is None:
             return self
 
         if self._split.is_nominal:
             try:
-                node = self._children[X[self._split.feature_idx]]
+                node = self._children[x[self._split.feature_idx]]
             except KeyError:
                 # Create new node to encompass the emerging category
-                self._children[X[self._split.feature_idx]] = SGTNode(
+                self._children[x[self._split.feature_idx]] = SGTNode(
                     prediction=self._prediction, depth=self.depth + 1)
-                node = self._children[X[self._split.feature_idx]]
+                node = self._children[x[self._split.feature_idx]]
         else:
-            node = self._children[0] if X[self._split.feature_idx] <= self._split.feature_val \
+            node = self._children[0] if x[self._split.feature_idx] <= self._split.feature_val \
                 else self._children[1]
 
-        return node.sort_instance(X)
+        return node.sort_instance(x)
 
-    def update(self, X, grad_hess, sgt):
+    def update(self, x, grad_hess, sgt):
         # TODO: deal with missing features (skip update)
-        for idx, x in X.items():
-            if sgt.nominal_attributes is not None and idx in sgt.nominal_attributes:
+        for idx, x_val in x.items():
+            if not isinstance(x_val, numbers.Number) or (sgt.nominal_attributes is not None
+                                                         and idx in sgt.nominal_attributes):
                 try:
-                    self._split_stats[idx][x].add_instance(grad_hess)
+                    self._split_stats[idx][x_val].add_instance(grad_hess)
                 except KeyError:
                     # categorical features are treated with a simple dict structure
                     self._split_stats[idx] = {}

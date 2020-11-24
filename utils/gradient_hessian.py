@@ -131,7 +131,7 @@ class GradHessStats(BaseEBFQStat):
 
     # This method ignores correlations between delta_pred and the gradients/hessians! Considering
     # delta_pred is derived from the gradient and hessian sample, this assumption is definitely
-    # violated. However, as empirically demonstrated on the original SGT, this fact does not seem
+    # violated. However, as empirically demonstrated in the original SGT, this fact does not seem
     # to significantly impact on the obtained results.
     def delta_loss_variance(self, delta_pred):
         variance = self.variance()

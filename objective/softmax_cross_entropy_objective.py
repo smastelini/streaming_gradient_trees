@@ -1,12 +1,9 @@
-# TODO: fix that
-import sys
 import math
 
-sys.path.append('..')
+from river.utils.math import softmax
 
 from .base_objective import BaseObjective
-
-from utils import GradHess
+from ..utils import GradHess
 
 
 class SoftmaxCrossEntropyObjective(BaseObjective):
@@ -23,15 +20,4 @@ class SoftmaxCrossEntropyObjective(BaseObjective):
         return result
 
     def transfer(self, y):
-        result = {}
-
-        max_ = max(y.values())
-        sum_ = 0.0
-        for class_idx in y:
-            result[class_idx] = math.exp(y[class_idx] - max_)
-            sum_ += result[class_idx]
-
-        if sum_ > 0.0:
-            result = {class_idx: val / sum_ for class_idx, val in result.items()}
-
-        return result
+        return softmax(y)

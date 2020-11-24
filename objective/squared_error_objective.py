@@ -1,11 +1,5 @@
-# TODO: fix that
-import sys
-
-sys.path.append('..')
-
 from .base_objective import BaseObjective
-
-from utils import GradHess
+from ..utils import GradHess
 
 
 class SquaredErrorObjective(BaseObjective):

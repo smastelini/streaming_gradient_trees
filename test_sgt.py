@@ -59,7 +59,7 @@ while stream.has_more_samples():
     X, y = stream.next_sample()
     ys.append(y[0])
     ys_sgt.append(sgt.predict(X[0])[0])
-    ys_htr.append(htr.predict(X)[0])
+    ys_htr.append(htr.leaf_prediction(X)[0])
 
     sgt.partial_fit(X[0], y[0])
     htr.partial_fit(X, y)
@@ -104,8 +104,8 @@ while stream.has_more_samples():
     X, y = stream.next_sample()
     ys.append(y[0])
     ys_sgt.append(sgt.predict(X[0])[0])
-    ys_isoup.append(isoup.predict(X)[0])
-    ys_meta.append(meta.predict(X)[0])
+    ys_isoup.append(isoup.leaf_prediction(X)[0])
+    ys_meta.append(meta.leaf_prediction(X)[0])
 
     sgt.partial_fit(X[0], y[0])
     isoup.partial_fit(X, y)
@@ -156,7 +156,7 @@ for i in range(N_SAMPLES):
     X, y = stream.next_sample()
     ys.append(y[0])
     ys_sgt.append(sgt.predict(X[0])[0])
-    ys_ht.append(ht.predict(X)[0])
+    ys_ht.append(ht.leaf_prediction(X)[0])
 
     sgt.partial_fit(X[0], int(y[0]))
     ht.partial_fit(X, y)
@@ -203,7 +203,7 @@ for i in range(N_SAMPLES):
     X, y = stream.next_sample()
     ys.append(y[0])
     ys_sgt.append(sgt.predict(X[0])[0])
-    ys_ht.append(ht.predict(X)[0])
+    ys_ht.append(ht.leaf_prediction(X)[0])
 
     sgt.partial_fit(X[0], int(y[0]))
     ht.partial_fit(X, y)
@@ -251,7 +251,7 @@ while stream.has_more_samples():
 
     ys.append(y[0])
     ys_sgt.append(sgt.predict(X[0])[0])
-    ys_meta.append(meta.predict(X)[0])
+    ys_meta.append(meta.leaf_prediction(X)[0])
 
     sgt.partial_fit(X[0], y[0])
     meta.partial_fit(X, y)

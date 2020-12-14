@@ -1,22 +1,26 @@
-import sys
 import numbers
+import sys
+from typing import Dict, Hashable, Optional, Union
 
-from ..utils import EqualBinFeatureQuantizer, GradHessStats
+from ..utils import FeatureQuantizer, GradHess, GradHessStats
+
+from river.base.typing import FeatureName, Target
+from river import stats
 
 
 class SGTSplit:
     """ Split Class of the Streaming Gradient Trees (SGT).
 
-    SGTs only have one type of Node. Their nodes, however, can carry a split object that indicates
+    SGTs only have one type of node. Their nodes, however, can carry a split object that indicates
     they have been split and are not leaves anymore.
     """
-    def __init__(self, feature_idx=None, feature_val=None, is_nominal=False):
-        # loss_mean and loss_var are actually statistics of the approximation to the
-        # *change* in loss.
-
+    def __init__(self, feature_idx: FeatureName = None, feature_val: Target = None,
+                 is_nominal=False):
+        # loss_mean and loss_var are actually statistics that approximate the *change* in loss.
         self.loss_mean = 0.0
         self.loss_var = 0.0
         self.delta_pred = None
+
         self.feature_idx = feature_idx
         self.feature_val = feature_val
         self.is_nominal = is_nominal
@@ -27,12 +31,13 @@ class SGTNode:
         self._prediction = prediction
         self.depth = depth
 
-        self.reset()
+        # Split test
+        self._split: Optional[SGTSplit] = None
+        self._children: Optional[Dict[Hashable, 'SGTNode']] = None
+        self._split_stats: Optional[Dict[FeatureName, Union[GradHessStats, FeatureQuantizer]]] = {}
+        self._update_stats = GradHessStats()
 
     def reset(self):
-        # Split test
-        self._split = None
-        self._children = None
         self._split_stats = {}
         self._update_stats = GradHessStats()
 
@@ -46,48 +51,54 @@ class SGTNode:
             except KeyError:
                 # Create new node to encompass the emerging category
                 self._children[x[self._split.feature_idx]] = SGTNode(
-                    prediction=self._prediction, depth=self.depth + 1)
+                    prediction=self._prediction, depth=self.depth + 1
+                )
                 node = self._children[x[self._split.feature_idx]]
         else:
-            node = self._children[0] if x[self._split.feature_idx] <= self._split.feature_val \
-                else self._children[1]
+            try:
+                node = self._children[0] if x[self._split.feature_idx] <= self._split.feature_val \
+                    else self._children[1]
+            except KeyError:  # Numerical split feature is missing from instance
+                # Select the most traversed branch
+                branch = max(self._children, key=lambda k: self._children[k].total_weight)
+                node = self._children[branch]
 
         return node.sort_instance(x)
 
-    def update(self, x, grad_hess, sgt):
-        # TODO: deal with missing features (skip update)
+    def update(self, x: dict, grad_hess: GradHess, sgt, w: float = 1.):
         for idx, x_val in x.items():
-            if not isinstance(x_val, numbers.Number) or (sgt.nominal_attributes is not None
-                                                         and idx in sgt.nominal_attributes):
+            if not isinstance(x_val, numbers.Number) or (
+                    sgt.nominal_attributes is not None
+                    and idx in sgt.nominal_attributes
+            ):
                 try:
-                    self._split_stats[idx][x_val].add_instance(grad_hess)
+                    self._split_stats[idx][x_val].update(grad_hess, w=w)
                 except KeyError:
-                    # categorical features are treated with a simple dict structure
+                    # Categorical features are treated with a simple dict structure
                     self._split_stats[idx] = {}
                     self._split_stats[idx][x] = GradHessStats()
-                    self._split_stats[idx][x].add_instance(grad_hess)
+                    self._split_stats[idx][x].update(grad_hess, w=w)
             else:
-                stats = GradHessStats()
-                stats.add_instance(grad_hess, x)
+                ghs = GradHessStats()
+                ghs.update(grad_hess, x, w)
                 try:
-                    self._split_stats[idx].add(stats)
+                    self._split_stats[idx].update(ghs)
                 except KeyError:
                     # Create a new quantizer
                     quantization_radius = sgt._get_quantization_radius(idx)
-                    self._split_stats[idx] = EqualBinFeatureQuantizer(
-                        radius=quantization_radius)
-                    self._split_stats[idx].add(stats)
+                    self._split_stats[idx] = FeatureQuantizer(radius=quantization_radius)
+                    self._split_stats[idx].update(ghs)
 
-        self._update_stats.add_instance(grad_hess)
+        self._update_stats.update(grad_hess, w=w)
 
-    def predict(self):
+    def leaf_prediction(self):
         return self._prediction
 
     def find_best_split(self, sgt):
         best = SGTSplit()
 
         # Null split: update the prediction using the new gradient information
-        best.delta_pred = self.compute_delta_prediction(self._update_stats.mean(), sgt)
+        best.delta_pred = self.delta_prediction(self._update_stats.mean(), sgt)
         best.loss_mean = self._update_stats.delta_loss_mean(best.delta_pred)
         best.loss_var = self._update_stats.delta_loss_variance(best.delta_pred)
 
@@ -102,28 +113,27 @@ class SGTNode:
 
                 candidate.is_nominal = True
                 candidate.delta_pred = {}
-                loss_mean = 0.0
-                loss_var = 0.0
-                observations = 0
+                loss_mean = stats.Mean()
+                loss_var = stats.Var(ddof=1)
+                total_weight = 0
 
                 cat_collection = self._split_stats[feature_idx]
                 for category in cat_collection:
-                    p = self.compute_delta_prediction(
-                        cat_collection[category].mean(), sgt)
+                    dp = delta_prediction(cat_collection[category].mean(), sgt.lmbda)
 
-                    m = cat_collection[category].delta_loss_mean(p)
-                    s = cat_collection[category].delta_loss_variance(p)
+                    dlm = cat_collection[category].delta_loss_mean(dp)
+                    dls = cat_collection[category].delta_loss_variance(dp)
 
-                    n = cat_collection[category].n_observations
-                    candidate.delta_pred[category] = p
+                    n = cat_collection[category].total_weight
+                    candidate.delta_pred[category] = dp
 
-                    loss_mean = GradHessStats.combine_mean(loss_mean, observations, m, n)
-                    loss_var = GradHessStats.combine_variance(loss_mean, loss_var, observations,
-                                                              m, s, n)
-                    observations += n
+                    loss_mean = GradHessStats.combine_mean(loss_mean, total_weight, dlm, n)
+                    loss_var = GradHessStats.combine_variance(loss_mean, loss_var, total_weight,
+                                                              dlm, dls, n)
+                    total_weight += n
 
                 candidate.loss_mean = (loss_mean + len(cat_collection) *
-                                       sgt.gamma / self._update_stats.n_observations)
+                                       sgt.gamma / self._update_stats.total_weight)
                 candidate.loss_var = loss_var
             else:  # Numerical features
                 quantizer = self._split_stats[feature_idx]
@@ -151,13 +161,13 @@ class SGTNode:
                 candidate.delta_pred = {}
 
                 for j in range(n_bins):
-                    delta_pred_left = self.compute_delta_prediction(forward_cumsum[j].mean(), sgt)
+                    delta_pred_left = self.delta_prediction(forward_cumsum[j].mean(), sgt)
                     loss_mean_left = forward_cumsum[j].delta_loss_mean(delta_pred_left)
                     loss_var_left = forward_cumsum[j].delta_loss_variance(delta_pred_left)
                     weight_left = forward_cumsum[j].n_observations
 
-                    delta_pred_right = self.compute_delta_prediction(backward_cumsum[j].mean(),
-                                                                     sgt)
+                    delta_pred_right = self.delta_prediction(backward_cumsum[j].mean(),
+                                                             sgt)
                     loss_mean_right = backward_cumsum[j].delta_loss_mean(delta_pred_right)
                     loss_var_right = backward_cumsum[j].delta_loss_variance(delta_pred_right)
                     weight_right = backward_cumsum[j].n_observations
@@ -169,8 +179,9 @@ class SGTNode:
                         loss_mean_right, loss_var_right, weight_right)
 
                     if loss_mean < candidate.loss_mean:
-                        candidate.loss_mean = (loss_mean + 2.0 * sgt.gamma /
-                                               self._update_stats.n_observations)
+                        candidate.loss_mean = (
+                            loss_mean + 2.0 * sgt.gamma / self._update_stats.total_weight
+                        )
                         candidate.loss_var = loss_var
                         candidate.delta_pred[0] = delta_pred_left
                         candidate.delta_pred[1] = delta_pred_right
@@ -201,22 +212,25 @@ class SGTNode:
         # Create children
         self._children = {}
         for child_idx, delta_pred in split.delta_pred.items():
-            self._children[child_idx] = SGTNode(prediction=self._prediction + delta_pred,
-                                                depth=self.depth + 1)
+            self._children[child_idx] = SGTNode(
+                prediction=self._prediction + delta_pred,
+                depth=self.depth + 1
+            )
         # Free memory used to monitor splits
         self._split_stats = None
-        # Update max depth
 
+        # Update max depth
         if self.depth + 1 > sgt._max_depth:
             sgt._max_depth = self.depth + 1
-
-    def compute_delta_prediction(self, grad_hess, sgt):
-        # Add small constant value to avoid division by zero
-        return -grad_hess.gradient / (grad_hess.hessian + sys.float_info.min + sgt.lmbda)
 
     def is_leaf(self):
         return self._children is None
 
     @property
-    def n_observations(self):
-        return self._update_stats.n_observations
+    def total_weight(self):
+        return self._update_stats.total_weight
+
+
+def delta_prediction(grad_hess, lmbda):
+    # Add small constant value to avoid division by zero
+    return -grad_hess.gradient / (grad_hess.hessian + sys.float_info.min + lmbda)

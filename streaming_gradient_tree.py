@@ -4,7 +4,7 @@ from scipy.stats import f as FTest
 
 from skmultiflow.core import BaseSKMObject, ClassifierMixin, RegressorMixin, MultiOutputMixin
 from skmultiflow.utils import get_dimensions
-from nodes.streaming_gradient_tree_node import SGTNode
+from nodes.sgt_nodes import SGTNode
 from objective import BinaryCrossEntropyObjective, SoftmaxCrossEntropyObjective, \
     SquaredErrorObjective
 
@@ -356,12 +356,12 @@ class StreamingGradientTree(BaseSKMObject, ClassifierMixin, RegressorMixin, Mult
         leaf = self._roots[target_idx].sort_instance(X)
         leaf.update(X, grad_hess, self)
 
-        if leaf.n_observations % self.grace_period != 0:
+        if leaf.total_weight % self.grace_period != 0:
             return
 
         best_split = leaf.find_best_split(self)
 
-        p = StreamingGradientTree._compute_p_value(best_split, leaf.n_observations)
+        p = StreamingGradientTree._compute_p_value(best_split, leaf.total_weight)
         if p < self.delta and best_split.loss_mean < 0.0:
             leaf.apply_split(best_split, self)
 
@@ -410,7 +410,7 @@ class StreamingGradientTree(BaseSKMObject, ClassifierMixin, RegressorMixin, Mult
         if self._task_type is None:
             return None  # Model was not initialized yet
 
-        preds = {target_class_idx: tree.sort_instance(X).predict()
+        preds = {target_class_idx: tree.sort_instance(X).leaf_prediction()
                  for target_class_idx, tree in self._roots.items()}
         return self._objective.transfer(preds)
 
@@ -443,7 +443,7 @@ class StreamingGradientTree(BaseSKMObject, ClassifierMixin, RegressorMixin, Mult
         elif self._task_type == self._REGRESSION:
             raise NotImplementedError('predict_proba only applies to classification problems.')
 
-        preds = {target_class_idx: tree.sort_instance(X).predict()
+        preds = {target_class_idx: tree.sort_instance(X).leaf_prediction()
                  for target_class_idx, tree in self._roots.items()}
         preds = self._objective.transfer(preds)
 

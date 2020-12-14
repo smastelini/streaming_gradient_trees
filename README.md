@@ -1,6 +1,6 @@
 # Streaming Gradient Trees
 
-Streaming Gradient Trees (SGT) to appear in skmultiflow
+Streaming Gradient Trees (SGT) to appear in `river`.
 
 To do a basic test, just run `python test_sgt.py`
 

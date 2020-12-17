@@ -47,9 +47,9 @@ class GradHessStats:
     """
     def __init__(self):
         self.x_m = stats.Mean()
-        self.g_var = stats.Var(ddof=1)
-        self.h_var = stats.Var(ddof=1)
-        self.gh_cov = stats.Cov(ddof=1)
+        self.g_var = stats.Var()
+        self.h_var = stats.Var()
+        self.gh_cov = stats.Cov()
 
     def get_x(self):
         """ Get the centroid x data that represents all the observations inside a bin. """
@@ -105,20 +105,20 @@ class GradHessStats:
     def total_weight(self):
         return self.g_var.mean.n
 
-    def delta_loss_mean(self, delta_pred):
-        m = self.mean()
-
-        return delta_pred * m.gradient + 0.5 * m.hessian * delta_pred * delta_pred
-
     # This method ignores correlations between delta_pred and the gradients/hessians! Considering
     # delta_pred is derived from the gradient and hessian sample, this assumption is definitely
     # violated. However, as empirically demonstrated in the original SGT, this fact does not seem
     # to significantly impact on the obtained results.
-    def delta_loss_variance(self, delta_pred):
+    def delta_loss_mean_var(self, delta_pred: float) -> stats.Var:
+        m = self.mean()
+        dlms = stats.Var()
+        dlms.mean.n = self.total_weight
+        dlms.mean.mean = delta_pred * m.gradient + 0.5 * m.hessian * delta_pred * delta_pred
+
         variance = self.variance()
         covariance = self.covariance()
 
         grad_term_var = delta_pred * delta_pred * variance.gradient
         hess_term_var = 0.25 * variance.hessian * (delta_pred ** 4.0)
-
-        return max(0.0, grad_term_var + hess_term_var + (delta_pred ** 3) * covariance)
+        dlms.sigma = max(0.0, grad_term_var + hess_term_var + (delta_pred ** 3) * covariance)
+        return dlms

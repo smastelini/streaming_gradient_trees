@@ -1,3 +1,4 @@
+import math
 import numbers
 import sys
 from typing import Dict, Hashable, Optional, Union
@@ -68,8 +69,8 @@ class SGTNode:
     def update(self, x: dict, grad_hess: GradHess, sgt, w: float = 1.):
         for idx, x_val in x.items():
             if not isinstance(x_val, numbers.Number) or (
-                    sgt.nominal_attributes is not None
-                    and idx in sgt.nominal_attributes
+                sgt.nominal_attributes is not None
+                and idx in sgt.nominal_attributes
             ):
                 try:
                     self._split_stats[idx][x_val].update(grad_hess, w=w)
@@ -98,9 +99,10 @@ class SGTNode:
         best = SGTSplit()
 
         # Null split: update the prediction using the new gradient information
-        best.delta_pred = self.delta_prediction(self._update_stats.mean(), sgt)
-        best.loss_mean = self._update_stats.delta_loss_mean(best.delta_pred)
-        best.loss_var = self._update_stats.delta_loss_variance(best.delta_pred)
+        best.delta_pred = delta_prediction(self._update_stats.mean(), sgt)
+        dlms = self._update_stats.delta_loss_mean_var(best.delta_pred)
+        best.loss_mean = dlms.mean.get()
+        best.loss_var = dlms.get()
 
         for feature_idx in self._split_stats:
             candidate = SGTSplit()
@@ -108,90 +110,67 @@ class SGTNode:
 
             if sgt.nominal_attributes is not None and feature_idx in sgt.nominal_attributes:
                 # Nominal attribute has been already used in a previous split
-                if feature_idx in sgt._splitted:
+                if feature_idx in sgt._split_features:
                     continue
 
                 candidate.is_nominal = True
                 candidate.delta_pred = {}
-                loss_mean = stats.Mean()
-                loss_var = stats.Var(ddof=1)
-                total_weight = 0
+                all_dlms = stats.Var()
 
                 cat_collection = self._split_stats[feature_idx]
                 for category in cat_collection:
-                    dp = delta_prediction(cat_collection[category].mean(), sgt.lmbda)
+                    dp = delta_prediction(cat_collection[category].mean(), sgt.lambda_value)
 
-                    dlm = cat_collection[category].delta_loss_mean(dp)
-                    dls = cat_collection[category].delta_loss_variance(dp)
-
-                    n = cat_collection[category].total_weight
+                    dlms = cat_collection[category].delta_loss_mean_var(dp)
                     candidate.delta_pred[category] = dp
 
-                    loss_mean = GradHessStats.combine_mean(loss_mean, total_weight, dlm, n)
-                    loss_var = GradHessStats.combine_variance(loss_mean, loss_var, total_weight,
-                                                              dlm, dls, n)
-                    total_weight += n
+                    all_dlms += dlms
 
-                candidate.loss_mean = (loss_mean + len(cat_collection) *
-                                       sgt.gamma / self._update_stats.total_weight)
-                candidate.loss_var = loss_var
+                candidate.loss_mean = (
+                    all_dlms.mean.get() + len(cat_collection) * sgt.gamma / self.total_weight
+                )
+                candidate.loss_var = all_dlms.get()
             else:  # Numerical features
                 quantizer = self._split_stats[feature_idx]
+                half_radius = quantizer.radius / 2.
                 n_bins = len(quantizer)
-
-                if n_bins == 1:  # Insufficient bins to perform splits
+                if n_bins == 1:  # Insufficient number of bins to perform splits
                     continue
 
-                forward_cumsum = [None for _ in range(n_bins)]
-                backward_cumsum = [None for _ in range(n_bins)]
-
-                # Forward cumulative sum
-                for j, f in enumerate(quantizer.ordered()):
-                    forward_cumsum[j] = quantizer[f].clone()
-                    if j > 0:
-                        forward_cumsum[j] += forward_cumsum[j - 1]
-
-                # Backward cumulative sum
-                for j, b in zip(range(n_bins - 1, -1, -1), quantizer.ordered_rev()):
-                    backward_cumsum[j] = quantizer[b].clone()
-                    if j + 1 < n_bins:
-                        backward_cumsum[j] += backward_cumsum[j + 1]
-
-                candidate.loss_mean = float('Inf')
+                candidate.loss_mean = math.inf
                 candidate.delta_pred = {}
 
-                for j in range(n_bins):
-                    delta_pred_left = self.delta_prediction(forward_cumsum[j].mean(), sgt)
-                    loss_mean_left = forward_cumsum[j].delta_loss_mean(delta_pred_left)
-                    loss_var_left = forward_cumsum[j].delta_loss_variance(delta_pred_left)
-                    weight_left = forward_cumsum[j].n_observations
+                # Auxiliary gradient and hessian statistics
+                left_ghs = GradHessStats()
+                left_dlms = stats.Var()
+                for i, ghs in enumerate(quantizer):
+                    left_ghs += ghs
+                    left_delta_pred = delta_prediction(left_ghs.mean(), sgt)
+                    left_dlms += left_ghs.delta_loss_mean_var(left_delta_pred)
 
-                    delta_pred_right = self.delta_prediction(backward_cumsum[j].mean(),
-                                                             sgt)
-                    loss_mean_right = backward_cumsum[j].delta_loss_mean(delta_pred_right)
-                    loss_var_right = backward_cumsum[j].delta_loss_variance(delta_pred_right)
-                    weight_right = backward_cumsum[j].n_observations
+                    right_ghs = self._update_stats - left_ghs
+                    right_delta_pred = delta_prediction(right_ghs.mean(), sgt)
+                    right_dlms = right_ghs.delta_loss_mean_var(right_delta_pred)
 
-                    loss_mean = GradHessStats.combine_mean(loss_mean_left, weight_left,
-                                                           loss_mean_right, weight_right)
-                    loss_var = GradHessStats.combine_variance(
-                        loss_mean_left, loss_var_left, weight_left,
-                        loss_mean_right, loss_var_right, weight_right)
+                    all_dlms = left_dlms + right_dlms
+
+                    loss_mean = all_dlms.mean.get()
+                    loss_var = all_dlms.get()
 
                     if loss_mean < candidate.loss_mean:
                         candidate.loss_mean = (
                             loss_mean + 2.0 * sgt.gamma / self._update_stats.total_weight
                         )
                         candidate.loss_var = loss_var
-                        candidate.delta_pred[0] = delta_pred_left
-                        candidate.delta_pred[1] = delta_pred_right
+                        candidate.delta_pred[0] = left_delta_pred
+                        candidate.delta_pred[1] = right_delta_pred
 
                         # Define split point
-                        if j == n_bins - 1:  # Last bin
-                            candidate.feature_val = forward_cumsum[j].get_x()
+                        if i == n_bins - 1:  # Last bin
+                            candidate.feature_val = ghs.get_x()
                         else:  # Use middle point between bins
-                            candidate.feature_val = (forward_cumsum[j].get_x() +
-                                                     forward_cumsum[j + 1].get_x()) / 2.0
+                            candidate.feature_val = ghs.get_x() + half_radius
+
             if candidate.loss_mean < best.loss_mean:
                 best = candidate
 
@@ -207,7 +186,7 @@ class SGTNode:
 
         self._split = split
         sgt._n_splits += 1
-        sgt._splitted.add(split.feature_idx)
+        sgt._split_features.add(split.feature_idx)
 
         # Create children
         self._children = {}
@@ -220,17 +199,21 @@ class SGTNode:
         self._split_stats = None
 
         # Update max depth
-        if self.depth + 1 > sgt._max_depth:
-            sgt._max_depth = self.depth + 1
+        if self.depth + 1 > sgt._depth:
+            sgt._depth = self.depth + 1
 
     def is_leaf(self):
         return self._children is None
+
+    @property
+    def children(self):
+        return self._children
 
     @property
     def total_weight(self):
         return self._update_stats.total_weight
 
 
-def delta_prediction(grad_hess, lmbda):
+def delta_prediction(grad_hess, lambda_value):
     # Add small constant value to avoid division by zero
-    return -grad_hess.gradient / (grad_hess.hessian + sys.float_info.min + lmbda)
+    return -grad_hess.gradient / (grad_hess.hessian + sys.float_info.min + lambda_value)

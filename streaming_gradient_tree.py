@@ -75,7 +75,8 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
     ---------
     [^1]: Gouk, H., Pfahringer, B., & Frank, E. (2019, October). Stochastic Gradient Trees.
     In Asian Conference on Machine Learning (pp. 1094-1109).
-    [^2]:
+    [^2]: Mastelini, S.M. and de Carvalho, A.C.P.D.L.F., 2020. Using dynamical quantization to
+    perform split attempts in online tree regressors. arXiv preprint arXiv:2012.00083.
     """
 
     _STD_DIV = 'stddiv'
@@ -123,19 +124,13 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
 
         self._objective: BaseObjective
 
-    @abc.abstractmethod
     def _target_transform(self, y):
         """Apply transformation to the raw target input.
 
-        Different strategies are used for classification and regression.
+        Different strategies are used for classification and regression. By default, implement
+        an identity function.
         """
-
-    @abc.abstractmethod
-    def _inverse_target_transform(self, y):
-        """Obtain the original scale of a transformed target value.
-
-        Different strategies are used for classification and regression.
-        """
+        return y
 
     def _update_features_stats(self, x: dict):
         """ Update inner tree statistics with a new observation.
@@ -170,54 +165,6 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
 
         return std_ / self.quantization_radius_div
 
-    # def _init_trees(self, y):
-    #     """ Define the loss function, learning task, and target transformation methods depending on
-    #     the type of the target(s).
-    #
-    #     It also initializes the minimum number of needed trees for each learning task. In all
-    #     tasks except classification this number is static. Classification tasks, on the other hand,
-    #     might enconter new incoming classes, which are handled dynamically by creating new trees
-    #     in the comitte.
-    #     """
-    #
-    #     # TODO: enable choosing manually the type of learning task?
-    #
-    #     if hasattr(y, '__len__') and len(y) > 1:
-    #         self._is_multi_output = True
-    #         self._n_targets = len(y)
-    #         aux_target = y[list(y.keys())[0]]
-    #     else:
-    #         aux_target = y
-    #
-    #     if isinstance(aux_target, int) or isinstance(aux_target, np.integer):  # Classification
-    #         self._task_type = self._CLASSIFICATION
-    #         if self._is_multi_output:
-    #             self._objective = BinaryCrossEntropyObjective()
-    #             self._roots = {class_idx: SGTNode(prediction=self.init_pred)
-    #                            for class_idx in range(self._n_targets)}
-    #             # Does not require target transformation
-    #             self._target_transformer = self._identity_helper
-    #             self._inverse_target_transformer = self._inverse_transform_target_multi_label
-    #         else:  # Binary or multiclass classification
-    #             self._objective = SoftmaxCrossEntropyObjective()
-    #             self._roots = {y: SGTNode(prediction=self.init_pred)}
-    #             self._target_transformer = self._transform_target_classification
-    #             self._inverse_target_transformer = self._inverse_transform_target_classification
-    #     else:  # Regression
-    #         self._task_type = self._REGRESSION
-    #         self._objective = SquaredErrorObjective()
-    #
-    #         if self._is_multi_output:
-    #             self._roots = {target_idx: SGTNode(prediction=self.init_pred)
-    #                            for target_idx in range(self._n_targets)}
-    #             # Does not require target transformation nor inverse transformation
-    #             self._target_transformer = self._identity_helper
-    #             self._inverse_target_transformer = self._identity_helper
-    #         else:  # Single-target regression
-    #             self._roots = {0: SGTNode(prediction=self.init_pred)}
-    #             self._target_transformer = self._transform_target_regression
-    #             self._inverse_target_transformer = self._inverse_transform_target_regression
-
     def _update_tree(self, x: dict, grad_hess: GradHess):
         """ Update Streaming Gradient Tree with a single instance. """
 
@@ -249,10 +196,10 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
     def learn_one(self, x, y):
         self._update_features_stats(x)
 
-        pred = self._raw_prediction(x)
+        raw_pred = self._raw_prediction(x)
         label = self._target_transform(y)
 
-        grad_hess = self._objective.compute_derivatives(label, pred)
+        grad_hess = self._objective.compute_derivatives(label, raw_pred)
 
         # Update the tree with the gradient/hessian info
         self._update_tree(x, grad_hess)
@@ -315,8 +262,13 @@ class StreamingGradientTreeClassifier(BaseStreamingGradientTree, base.Classifier
 
         self._objective = BinaryCrossEntropyObjective()
 
+    def _target_transform(self, y):
+        return float(y)
+
     def predict_proba_one(self, x: dict) -> typing.Dict[base.typing.ClfTarget, float]:
-        pass
+        t_proba = self._objective.transfer(self._root.sort_instance(x).leaf_prediction())
+
+        return {True: t_proba, False: 1 - t_proba}
 
 
 class StreamingGradientTreeRegressor(BaseStreamingGradientTree, base.Regressor):
@@ -342,4 +294,4 @@ class StreamingGradientTreeRegressor(BaseStreamingGradientTree, base.Regressor):
         self._objective = SquaredErrorObjective()
 
     def predict_one(self, x: dict) -> base.typing.RegTarget:
-        pass
+        return self._root.sort_instance(x).leaf_prediction()

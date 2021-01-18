@@ -4,7 +4,6 @@ import functools
 import math
 import typing
 
-import numpy as np
 from scipy.stats import f as FTest
 
 from river import base
@@ -199,7 +198,7 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
         raw_pred = self._raw_prediction(x)
         label = self._target_transform(y)
 
-        grad_hess = self._objective.compute_derivatives(label, raw_pred)
+        grad_hess = self._objective.compute_derivatives(label, raw_pred)   # noqa
 
         # Update the tree with the gradient/hessian info
         self._update_tree(x, grad_hess)
@@ -208,7 +207,7 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
         """ Obtain a raw prediction for a single instance. """
 
         pred = self._root.sort_instance(x).leaf_prediction()
-        return self._objective.transfer(pred)
+        return self._objective.transfer(pred)    # noqa
 
     @property
     def n_nodes(self):

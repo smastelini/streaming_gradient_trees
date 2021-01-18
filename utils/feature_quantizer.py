@@ -2,7 +2,18 @@ import math
 
 
 class FeatureQuantizer:
-    """ Adapted version of the Quantizer Observer (QO) that is applied to SGTs. """
+    """ Adapted version of the Quantizer Observer (QO) that is applied to SGTs [^1].
+
+    Parameters
+    ----------
+    radius
+        The quantization radius.
+
+    References
+    ----------
+    [^1]: Mastelini, S.M. and de Carvalho, A.C.P.D.L.F., 2020. Using dynamical quantization to
+    perform split attempts in online tree regressors. arXiv preprint arXiv:2012.00083.
+    """
     def __init__(self, radius):
         self.radius = radius
         # Define the random projection

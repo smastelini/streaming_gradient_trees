@@ -9,9 +9,9 @@ from scipy.stats import f as FTest
 from river import base
 from river import stats
 
-from nodes.sgt_nodes import SGTNode
-from objective import BaseObjective, BinaryCrossEntropyObjective, SquaredErrorObjective
-from utils import GradHess
+from .nodes import SGTNode
+from .objective import BaseObjective, BinaryCrossEntropyObjective, SquaredErrorObjective
+from .utils import GradHess
 
 
 class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
@@ -93,7 +93,7 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
         self.delta = delta
         self.grace_period = grace_period
         self.init_pred = init_pred
-        self.max_depth = max_depth
+        self.max_depth = max_depth if max_depth else math.inf
 
         if lambda_value < 0.0:
             raise ValueError('Invalid value: "lambda_value" must be positive.')

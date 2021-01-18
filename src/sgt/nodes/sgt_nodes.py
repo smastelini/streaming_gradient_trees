@@ -81,7 +81,7 @@ class SGTNode:
                     self._split_stats[idx][x].update(grad_hess, w=w)
             else:
                 ghs = GradHessStats()
-                ghs.update(grad_hess, x, w)
+                ghs.update(grad_hess, x_val, w)
                 try:
                     self._split_stats[idx].update(ghs)
                 except KeyError:
@@ -99,7 +99,7 @@ class SGTNode:
         best = SGTSplit()
 
         # Null split: update the prediction using the new gradient information
-        best.delta_pred = delta_prediction(self._update_stats.mean(), sgt)
+        best.delta_pred = delta_prediction(self._update_stats.mean(), sgt.lambda_value)
         dlms = self._update_stats.delta_loss_mean_var(best.delta_pred)
         best.loss_mean = dlms.mean.get()
         best.loss_var = dlms.get()
@@ -145,11 +145,11 @@ class SGTNode:
                 left_dlms = stats.Var()
                 for i, ghs in enumerate(quantizer):
                     left_ghs += ghs
-                    left_delta_pred = delta_prediction(left_ghs.mean(), sgt)
+                    left_delta_pred = delta_prediction(left_ghs.mean(), sgt.lambda_value)
                     left_dlms += left_ghs.delta_loss_mean_var(left_delta_pred)
 
                     right_ghs = self._update_stats - left_ghs
-                    right_delta_pred = delta_prediction(right_ghs.mean(), sgt)
+                    right_delta_pred = delta_prediction(right_ghs.mean(), sgt.lambda_value)
                     right_dlms = right_ghs.delta_loss_mean_var(right_delta_pred)
 
                     all_dlms = left_dlms + right_dlms

@@ -1,11 +1,11 @@
 from river import synth
 from river import metrics
 
-from streaming_gradient_tree import StreamingGradientTreeRegressor
+from sgt import StreamingGradientTreeRegressor
 
 metric = metrics.MAE()
 
-dataset = iter(synth.Friedman.take(5000))
+dataset = iter(synth.Friedman(seed=42).take(5000))
 
 tree = StreamingGradientTreeRegressor()
 

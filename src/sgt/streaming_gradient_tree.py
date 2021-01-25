@@ -164,11 +164,11 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
 
         return std_ / self.quantization_radius_div
 
-    def _update_tree(self, x: dict, grad_hess: GradHess):
+    def _update_tree(self, x: dict, grad_hess: GradHess, w: float):
         """ Update Streaming Gradient Tree with a single instance. """
 
         leaf = self._root.sort_instance(x)
-        leaf.update(x, grad_hess, self)
+        leaf.update(x, grad_hess, self, w)
 
         if leaf.total_weight % self.grace_period != 0 or leaf.depth >= self.max_depth:
             return
@@ -193,7 +193,7 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
 
         return 1 - FTest.cdf(F, 1, n_observations - 1)
 
-    def learn_one(self, x, y):
+    def learn_one(self, x, y, *, w=1.0):
         self._update_features_stats(x)
 
         raw_pred = self._raw_prediction(x)
@@ -202,7 +202,7 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
         grad_hess = self._objective.compute_derivatives(label, raw_pred)   # noqa
 
         # Update the tree with the gradient/hessian info
-        self._update_tree(x, grad_hess)
+        self._update_tree(x, grad_hess, w)
 
     def _raw_prediction(self, x):
         """ Obtain a raw prediction for a single instance. """

@@ -16,7 +16,6 @@ class FeatureQuantizer:
     """
     def __init__(self, radius):
         self.radius = radius
-        # Define the random projection
         self.hash = {}
 
     def __getitem__(self, k):

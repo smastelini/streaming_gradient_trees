@@ -176,6 +176,7 @@ class BaseStreamingGradientTree(base.Estimator, metaclass=abc.ABCMeta):
         best_split = leaf.find_best_split(self)
 
         p = self._compute_p_value(best_split, leaf.total_weight)
+
         if p < self.delta and best_split.loss_mean < 0:
             leaf.apply_split(best_split, self)
 

@@ -159,7 +159,7 @@ class SGTNode:
 
                     if loss_mean < candidate.loss_mean:
                         candidate.loss_mean = (
-                            loss_mean + 2.0 * sgt.gamma / self._update_stats.total_weight
+                            loss_mean + 2.0 * sgt.gamma / self.total_weight
                         )
                         candidate.loss_var = loss_var
                         candidate.delta_pred[0] = left_delta_pred
